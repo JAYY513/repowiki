@@ -1,0 +1,39 @@
+{
+  "name": "@loomwiki/repowiki",
+  "version": "0.1.0",
+  "description": "Agent-facing project wiki pipeline: scan, generate, validate and keep project knowledge fresh for coding agents",
+  "type": "module",
+  "bin": {
+    "repowiki": "./bin/repowiki.mjs"
+  },
+  "files": [
+    "bin/",
+    "skills/",
+    "assets/",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "wiki",
+    "agent-skills",
+    "ai-agents",
+    "documentation",
+    "knowledge-base",
+    "okf",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JAYY513/repowiki.git"
+  },
+  "homepage": "https://github.com/JAYY513/repowiki#readme",
+  "bugs": {
+    "url": "https://github.com/JAYY513/repowiki/issues"
+  },
+  "license": "MIT",
+  "private": true
+}

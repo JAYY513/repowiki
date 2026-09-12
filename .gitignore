@@ -1,0 +1,5 @@
+node_modules/
+*.log
+
+# Runtime artifacts (this repo is the product source; runtime state stays local)
+.repowiki/
