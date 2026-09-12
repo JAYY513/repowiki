@@ -83,6 +83,66 @@ That's all. The skill starts by running `repowiki init` itself (idempotent) to w
 
 The wiring makes your agent check freshness as it works. When new commits leave the wiki behind, it will say so — just ask for `/repowiki-gen` again. Regeneration is incremental: only affected pages are rewritten; hand-edited and `protected` pages survive untouched.
 
+## See it in action
+
+Real output from this repository (generated 2026-09-11, baseline `b13fdc4`).
+
+**`repowiki scan`** — walk the repo, fingerprint every file:
+
+```
+$ repowiki scan --json
+{
+  "stats": { "total_files": 11, "total_lines": 4103,
+             "languages": { "markdown": 6, "javascript": 2, "json": 1, "other": 2 } },
+  "excluded": { "files": [{ "path": "assets/logo.png", "reason": "binary" }], "size_limit": "1MB" }
+}
+```
+
+**`repowiki status`** — freshness as a number, made for hooks:
+
+```
+$ repowiki status --json
+{"status":"fresh","commit":"b13fdc4be9089225805f0dbfc28b2a49adb3a4cb"}
+
+$ repowiki status --quiet
+fresh
+```
+
+**`repowiki validate`** — the OKF bundle checks out clean:
+
+```
+$ repowiki validate --json
+{ "valid": true, "errors": [], "warnings": [] }
+```
+
+**The generated bundle** — `docs/repowiki/` after one `/repowiki-gen` run:
+
+```
+docs/repowiki/
+├── index.md                 routing entry: module list + article list
+├── knowledge/
+│   ├── CLI-工具/              five dimension cards (overview · architecture · tech-stack · coding-style · setup)
+│   └── 生成技能/              the skill that drives the pipeline
+├── content/                 项目总览 · 快速开始 · 产物格式
+└── log.md                   generation log (mode, baseline, coverage, validate result)
+```
+
+Each page carries frontmatter like this — that's what the read side matches against:
+
+```markdown
+---
+status: stable
+type: module
+dimension: overview
+triggers:
+  - CLI 命令
+  - repowiki 怎么用
+description: repowiki CLI 的定位与职责边界：init / scan / state / status / validate 五个子命令。
+---
+```
+
+The full sample bundle lives in [docs/repowiki/](docs/repowiki/index.md) — it's both this repo's own wiki and the reference output.
+
 ## What `init` writes into `AGENTS.md`
 
 The exact content, so you can review it before running. The block lives between HTML comment markers — re-runs update it in place, and your own text stays outside the markers:

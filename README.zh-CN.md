@@ -83,6 +83,66 @@ npx skills add JAYY513/repowiki
 
 接线会让你的 Agent 在工作中自查新鲜度——有新提交导致 wiki 过期时，它会主动提示，此时再说一次「生成 repowiki」即可。重生成是增量的：只重写受影响的页面，手工修改过和 `protected` 的页面原样保留。
 
+## 实际效果
+
+以下输出取自本仓库（生成于 2026-09-11，基线 `b13fdc4`）。
+
+**`repowiki scan`** —— 遍历仓库，为每个文件建立指纹：
+
+```
+$ repowiki scan --json
+{
+  "stats": { "total_files": 11, "total_lines": 4103,
+             "languages": { "markdown": 6, "javascript": 2, "json": 1, "other": 2 } },
+  "excluded": { "files": [{ "path": "assets/logo.png", "reason": "binary" }], "size_limit": "1MB" }
+}
+```
+
+**`repowiki status`** —— 新鲜度变成一个数字，为 hooks 而生：
+
+```
+$ repowiki status --json
+{"status":"fresh","commit":"b13fdc4be9089225805f0dbfc28b2a49adb3a4cb"}
+
+$ repowiki status --quiet
+fresh
+```
+
+**`repowiki validate`** —— OKF bundle 校验零错误零警告：
+
+```
+$ repowiki validate --json
+{ "valid": true, "errors": [], "warnings": [] }
+```
+
+**生成产物** —— 一次 `/repowiki-gen` 之后的 `docs/repowiki/`：
+
+```
+docs/repowiki/
+├── index.md                 路由入口：模块清单 + 文章清单
+├── knowledge/
+│   ├── CLI-工具/              五维知识卡（概述 · 架构设计 · 技术栈 · 编码规范 · 特殊配置与命令）
+│   └── 生成技能/              驱动流水线的技能模块
+├── content/                 项目总览 · 快速开始 · 产物格式
+└── log.md                   生成日志（模式、基线、覆盖率、validate 结果）
+```
+
+每个页面都带这样的 frontmatter——读取侧正是靠它做命中匹配：
+
+```markdown
+---
+status: stable
+type: module
+dimension: overview
+triggers:
+  - CLI 命令
+  - repowiki 怎么用
+description: repowiki CLI 的定位与职责边界：init / scan / state / status / validate 五个子命令。
+---
+```
+
+完整样例就在 [docs/repowiki/](docs/repowiki/index.md)——它既是本仓自己的 wiki，也是产物参考。
+
 ## `init` 往 `AGENTS.md` 写入的完整内容
 
 一字不差列出，供先审后跑。管理块位于 HTML 注释标记之间——重跑原位更新，你的内容放在标记之外即可：
