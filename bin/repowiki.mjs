@@ -619,10 +619,14 @@ function sourcesForPage(relPath, plan) {
     const pages = Array.isArray(mod.pages) ? mod.pages : [];
     const hitPage = pages.some((p) => p === rp || (typeof p === 'string' && p.replace(/^\.\//, '') === rp));
     const dir = mod.dir || mod.slug;
+    const hitFile = Boolean(dir) && (rp === `knowledge/${dir}.md` || rp === `knowledge/${dir}/README.md`);
     const hitDir = Boolean(dir) && rp.startsWith(`knowledge/${dir}/`);
     const slug = mod.slug;
     const hitLegacy = Boolean(slug) && (rp === `${slug}/overview.md` || rp.startsWith(`${slug}/`));
-    if (hitPage || hitDir || hitLegacy) addAll(mod.scope);
+    if (hitPage || hitFile || hitDir || hitLegacy) {
+      addAll(mod.source_files);
+      addAll(mod.scope);
+    }
   }
 
   if (Array.isArray(plan.articles)) {
@@ -1003,7 +1007,7 @@ async function cmdValidate(args) {
   }
 
   // Directory conventions are checked after frontmatter parsing (knowledge
-  // module directories anchor on a card with `dimension: overview`).
+  // module files carry `module` + category segments; aggregate dirs use README.md).
   const dirs = new Set();
   for (const f of mdFiles) {
     const dir = path.dirname(f.relPath);
@@ -1036,14 +1040,14 @@ async function cmdValidate(args) {
     const ff = parsed.fields;
 
     if (isRootIndex) {
-      // Root index.md: only okf_version and description allowed
-      const allowedRootFields = new Set(['okf_version', 'description']);
+      // Root index.md: okf_version/description plus aggregated public fields
+      const allowedRootFields = new Set(['okf_version', 'description', 'status', 'type', 'generated', 'source_commit', 'generator']);
       for (const key of Object.keys(ff)) {
         if (!allowedRootFields.has(key)) {
           warnings.push({
             file: f.relPath,
             field: key,
-            message: `field '${key}' not allowed in root index.md (only okf_version, description)`,
+            message: `field '${key}' not allowed in root index.md (only okf_version, description, status, type, generated, source_commit, generator)`,
           });
         }
       }
@@ -1052,9 +1056,24 @@ async function cmdValidate(args) {
 
     if (isLog) continue; // log.md content is free-form
 
+    const inKnowledge = f.relPath.startsWith('knowledge/');
+    const inContent = f.relPath.startsWith('content/');
+    const inKnowledgeAggregate = inKnowledge && f.relPath.endsWith('/README.md');
+    const isModuleFile = inKnowledge && !inKnowledgeAggregate;
+
     parsedFields.set(f.relPath, ff);
 
-    // Page-level files
+    if (isModuleFile) {
+      // Module file (one module per file): description + module required; no type/dimension/status/triggers
+      for (const rf of ['description', 'module']) {
+        if (ff[rf] === undefined || ff[rf] === '') {
+          errors.push({ file: f.relPath, field: rf, message: `missing required field '${rf}'` });
+        }
+      }
+      continue;
+    }
+
+    // Page-level files (articles + knowledge aggregate READMEs)
     const requiredFields = ['status', 'type', 'triggers', 'description'];
     for (const rf of requiredFields) {
       if (ff[rf] === undefined || ff[rf] === '') {
@@ -1068,12 +1087,9 @@ async function cmdValidate(args) {
       errors.push({ file: f.relPath, field: 'status', message: `invalid status '${ff.status}' (must be stable|draft|deprecated)` });
     }
 
-    // Validate type value by family (knowledge cards vs articles)
-    const inKnowledge = f.relPath.startsWith('knowledge/');
-    const inContent = f.relPath.startsWith('content/');
-    const knowledgeTypes = ['module'];
+    // Validate type value by family (articles only; knowledge module files handled above)
     const articleTypes = ['overview', 'getting_started', 'domain', 'deep_dive', 'developer_guide'];
-    const allowedTypes = inKnowledge ? knowledgeTypes : (inContent ? articleTypes : knowledgeTypes.concat(articleTypes));
+    const allowedTypes = inContent ? articleTypes : articleTypes.concat(['module']);
     if (ff.type && !allowedTypes.includes(ff.type)) {
       errors.push({
         file: f.relPath,
@@ -1082,15 +1098,29 @@ async function cmdValidate(args) {
       });
     }
 
-    // Knowledge cards carry a language-independent dimension field
-    if (inKnowledge && (ff.dimension === undefined || ff.dimension === '')) {
-      warnings.push({ file: f.relPath, field: 'dimension', message: 'knowledge card is missing the dimension field' });
-    }
-
     // Check triggers is a non-empty array or value
     if (ff.triggers !== undefined && ff.triggers !== '') {
       if (Array.isArray(ff.triggers) && ff.triggers.length === 0) {
         warnings.push({ file: f.relPath, field: 'triggers', message: 'triggers is an empty array' });
+      }
+    }
+
+    // Module files: validate segment category markers (## title <!-- category:x -->)
+    if (isModuleFile) {
+      const body = parsed.body || '';
+      const scannable = String(body).replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
+      const validCategories = new Set(['overview', 'architecture_design', 'tech_stack', 'coding_conventions', 'unique_setup_and_commands']);
+      const seen = [];
+      const catRegex = /^##\s+.+?<!--\s*category:([A-Za-z0-9_-]+)\s*-->/gm;
+      let m;
+      while ((m = catRegex.exec(scannable)) !== null) seen.push(m[1]);
+      if (!seen.includes('overview')) {
+        errors.push({ file: f.relPath, field: 'category', message: 'module file is missing required <!-- category:overview --> segment' });
+      }
+      for (const c of seen) {
+        if (!validCategories.has(c) && !/^[a-z][a-z0-9_]*$/.test(c)) {
+          errors.push({ file: f.relPath, field: 'category', message: `invalid category '${c}'` });
+        }
       }
     }
   }
@@ -1099,9 +1129,10 @@ async function cmdValidate(args) {
   for (const d of dirs) {
     if (d === 'knowledge' || d === 'content') continue; // family containers need no anchor
     if (d.startsWith('knowledge/')) {
-      const hasOverviewCard = mdFiles.some((f) => path.dirname(f.relPath) === d && parsedFields.get(f.relPath)?.dimension === 'overview');
-      if (!hasOverviewCard) {
-        warnings.push({ file: `${d}/`, field: null, message: `knowledge module directory ${d} has no card with dimension: overview` });
+      // Parent-module aggregate: README.md carries the emergent knowledge
+      const hasAggregate = mdFiles.some((f) => f.relPath === `${d}/README.md`);
+      if (!hasAggregate) {
+        warnings.push({ file: `${d}/`, field: null, message: `knowledge aggregate directory ${d} has no README.md` });
       }
       continue;
     }
@@ -1191,8 +1222,8 @@ async function cmdValidate(args) {
     }
     for (const mod of (Array.isArray(plan.modules) ? plan.modules : [])) {
       const dir = mod && (mod.dir || mod.slug);
-      if (dir && !fs.existsSync(path.join(wikiDir, 'knowledge', dir))) {
-        warnings.push({ file: 'plan.json', field: 'modules', message: `planned module directory not found: knowledge/${dir}/` });
+      if (dir && !fs.existsSync(path.join(wikiDir, 'knowledge', `${dir}.md`)) && !fs.existsSync(path.join(wikiDir, 'knowledge', dir, 'README.md')) && !fs.existsSync(path.join(wikiDir, 'knowledge', dir))) {
+        warnings.push({ file: 'plan.json', field: 'modules', message: `planned module file not found: knowledge/${dir}.md` });
       }
     }
   }

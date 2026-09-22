@@ -33,7 +33,7 @@ Coding agents re-discover your project from scratch in every session. Answering 
 
 | Capability | Details |
 |---|---|
-| **OKF bundle output** | Two families: `knowledge/` module cards (five dimensions, keyed by `dimension`) and `content/` articles; all pages carry `status` / `type` / `triggers` / `description` frontmatter |
+| **OKF bundle output** | Two families: `knowledge/` one-file-per-module (five dimensions as `<!-- category:x -->` sections) and `content/` articles; articles carry `status` / `type` / `triggers` / `description`, module files carry `description` + `module` / `source_files`, public fields aggregated in `index.md` |
 | **Zero-dependency CLI** | One Node.js file, no install tree — just Node ≥ 18 |
 | **Freshness baseline** | `state.json` pins the wiki to a commit; CI-friendly exit codes (`0` fresh · `10` stale · `11` missing) |
 | **Idempotent wiring** | `repowiki init` injects a managed block into `AGENTS.md` — re-runs are no-ops; hand-written `## repowiki` sections keep every line and only get the missing declaration appended |
@@ -118,26 +118,20 @@ $ repowiki validate --json
 **The generated bundle** — `docs/repowiki/` after one `/repowiki-gen` run:
 
 ```
-docs/repowiki/
-├── index.md                 routing entry: module list + article list
 ├── knowledge/
-│   ├── CLI-工具/              five dimension cards (overview · architecture · tech-stack · coding-style · setup)
-│   └── 生成技能/              the skill that drives the pipeline
+│   ├── CLI-工具.md              one module file (overview · architecture · tech-stack · coding-style · setup sections)
+│   └── 生成技能.md              the skill that drives the pipeline
 ├── content/                 项目总览 · 快速开始 · 产物格式
 └── log.md                   generation log (mode, baseline, coverage, validate result)
 ```
 
-Each page carries frontmatter like this — that's what the read side matches against:
+Each module file carries frontmatter like this — public fields live in `index.md`, not repeated per file:
 
 ```markdown
 ---
-status: stable
-type: module
-dimension: overview
-triggers:
-  - CLI 命令
-  - repowiki 怎么用
 description: repowiki CLI 的定位与职责边界：init / scan / state / status / validate 五个子命令。
+module: cli
+source_files: ["bin/**"]
 ---
 ```
 
@@ -208,14 +202,14 @@ Global flags: `--json` (machine-readable output), `--quiet` (minimal output, for
 | 1 | **scan** | `repowiki scan` | `.repowiki/snapshot.json` |
 | 2 | **budget** | agent | scale tier: flat / module tree / depth cap |
 | 3 | **plan** | agent | module & page plan → `.repowiki/plan.json` |
-| 4 | **generate** | agent (batched) | knowledge cards → `knowledge/` · articles → `content/` |
+| 4 | **generate** | agent (batched) | module files → `knowledge/` · articles → `content/` |
 | 5 | **link** | agent | cross-links between pages |
 | 6 | **validate** | `repowiki validate` | OKF validation report |
 | 7 | **finalize** | `repowiki state --update` | `state.json` (page map + baseline + last_run) + completion report |
 
 ## Design highlights
 
-- **Route before body** — every page declares `triggers`; the reader matches task intent against them and loads only the pages it needs.
+- **Route before body** — articles declare `triggers` and module files match `<!-- category:x -->` sections; the reader loads only the pages/sections it needs.
 - **Staleness is computed, not guessed** — `status` diffs the baseline commit against `HEAD`.
 - **Regeneration respects humans** — pages track `content_hash`; hand-edited pages are skipped by default, `protected: true` locks a page permanently, `--force` overrides.
 - **Crash-resilient runs** — batched generation checkpoints into `run.json`; a killed run resumes where it stopped instead of restarting.

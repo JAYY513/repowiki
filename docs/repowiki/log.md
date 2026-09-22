@@ -9,3 +9,9 @@
 - 文章：3 篇（项目总览、快速开始、产物格式）
 - 覆盖率：9/11（未覆盖：.gitignore、LICENSE）
 - validate：0 错误 / 0 警告（12 个文件；log.md 豁免 frontmatter 检查）
+
+## 2026-09-22 — 形状迁移（一模块一文件，breaking）
+
+- 旧 7 卡合并为 2 模块文件：`knowledge/CLI-工具.md`（5 段）+ `knowledge/生成技能.md`（2 段）；公共 frontmatter 收归 `index.md`。
+- 失效 URL（7）：`knowledge/CLI-工具/概述.md`、`knowledge/CLI-工具/架构设计.md`、`knowledge/CLI-工具/技术栈.md`、`knowledge/CLI-工具/编码规范.md`、`knowledge/CLI-工具/特殊配置与命令.md`、`knowledge/生成技能/概述.md`、`knowledge/生成技能/架构设计.md`。
+- validate：0 错误 / 0 警告（7 个文件）。
