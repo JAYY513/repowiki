@@ -23,3 +23,10 @@
 - 新增自定义主题机制（Qoder 式顶层独立目录单文件，`kind/name/category/scope/source_files`；本仓暂无自定义主题）。
 - 失效 URL（2）：`knowledge/CLI-工具.md`、`knowledge/生成技能.md`；恢复 URL（7）：见 2026-09-22 条目。
 - validate：0 错误 / 0 警告（14 个文件，含 2 个 `_module.yaml`）。
+
+## 2026-09-23 — Unicode 路径状态修复（增量）
+
+- 基线提交：`e96f322b458c6d105eeec0732b583b5370e83803`（main）。
+- 刷新 8 页：CLI 五维卡与 3 篇文章；模块清单与生成技能卡未受影响，保持不变。
+- 更新 `status` 的 git diff 路径处理，避免默认 `core.quotePath` 转义中文路径导致 `affected_pages` 漏报；文章补充状态引注索引与候选用途。
+- validate：0 错误 / 0 警告（14 个文件）；71 个源码行号引注均指向有效文件与行范围。

@@ -661,6 +661,77 @@ function collectWikiMarkdown(wikiDir) {
   return mdFiles;
 }
 
+function citationsForPage(content) {
+  const scannable = String(content || '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`\n]*`/g, '');
+  const citations = new Map();
+  const link = /\]\(file:\/\/([^\)#]+)#L(\d+)(?:-L?(\d+))?\)/g;
+  let match;
+  while ((match = link.exec(scannable)) !== null) {
+    let source;
+    try { source = decodeURIComponent(match[1]); } catch { source = match[1]; }
+    source = source.replace(/^\.\//, '');
+    const start = Number(match[2]);
+    const end = Number(match[3] || match[2]);
+    if (!source || start < 1 || end < start) continue;
+    const key = `${source}\0${start}\0${end}`;
+    const existing = citations.get(key);
+    if (existing) existing.occurrences++;
+    else citations.set(key, { source, line_start: start, line_end: end, occurrences: 1 });
+  }
+  return [...citations.values()];
+}
+
+function parseDiffRanges(diffOutput) {
+  const ranges = new Map();
+  let source = '';
+  for (const line of diffOutput.split('\n')) {
+    const fileMatch = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+    if (fileMatch) {
+      source = fileMatch[1];
+      if (source.startsWith('docs/repowiki/') || source.startsWith('.repowiki/')) {
+        source = '';
+        continue;
+      }
+      if (!ranges.has(source)) ranges.set(source, []);
+      continue;
+    }
+    const hunk = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+    if (!hunk || !source) continue;
+    const oldStart = Number(hunk[1]);
+    const oldCount = hunk[2] === undefined ? 1 : Number(hunk[2]);
+    const newCount = hunk[4] === undefined ? 1 : Number(hunk[4]);
+    ranges.get(source).push({ oldStart, oldCount, newCount });
+  }
+  return ranges;
+}
+
+function affectedCitations(pages, ranges) {
+  const affected = [];
+  for (const [page, info] of Object.entries(pages || {})) {
+    for (const citation of info.citations || []) {
+      let lineDelta = 0;
+      let overlapsChange = false;
+      for (const hunk of ranges.get(citation.source) || []) {
+        const delta = hunk.newCount - hunk.oldCount;
+        if (hunk.oldCount === 0) {
+          if (hunk.oldStart <= citation.line_start) lineDelta += delta;
+          if (hunk.oldStart >= citation.line_start && hunk.oldStart <= citation.line_end + 1) overlapsChange = true;
+        } else {
+          const oldEnd = hunk.oldStart + hunk.oldCount - 1;
+          if (hunk.oldStart <= citation.line_end && oldEnd >= citation.line_start) overlapsChange = true;
+          if (oldEnd < citation.line_start) lineDelta += delta;
+        }
+      }
+      if (overlapsChange || lineDelta !== 0) {
+        affected.push({ page, ...citation, reason: overlapsChange ? 'changed_lines' : 'line_shift', line_delta: lineDelta });
+      }
+    }
+  }
+  return affected;
+}
+
 function sourcesForPage(relPath, plan) {
   if (!plan || !Array.isArray(plan.modules)) return [];
   const rp = String(relPath).replace(/^\.\//, '');
@@ -741,7 +812,11 @@ function buildPagesMap(root) {
         if (typeof s === 'string' && s && !sources.includes(s)) sources.push(s);
       }
     }
-    pages[f.relPath] = { sources, content_hash: contentHash };
+    pages[f.relPath] = {
+      sources,
+      content_hash: contentHash,
+      citations: f.relPath.endsWith('.md') ? citationsForPage(readUtf8(f.fullPath)) : [],
+    };
   }
   return { pages, pageCount: mdFiles.length, plan };
 }
@@ -813,6 +888,7 @@ async function cmdState(args) {
       partition,
       generated_at: finishedAt,
       git,
+      citation_index_version: 1,
       pages,
       snapshot_digest: snapshotDigest,
       snapshot_file: '.repowiki/snapshot.json',
@@ -960,6 +1036,8 @@ async function cmdStatus(args) {
   let changedFiles = [];
   let commitCount = 0;
   let diffSucceeded = false;
+  let citationDiffSucceeded = false;
+  let changedLineRanges = new Map();
   try {
     const baselineCommit = state.git.commit;
     const diffOutput = execSync(
@@ -985,6 +1063,18 @@ async function cmdStatus(args) {
     ).trim();
     commitCount = parseInt(revCount, 10) || 0;
     diffSucceeded = true;
+    if (state.citation_index_version === 1) {
+      try {
+        const lineDiff = execSync(
+          `git -c core.quotePath=false diff --no-ext-diff --no-renames --unified=0 "${baselineCommit}"..HEAD`,
+          { encoding: 'utf-8', cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }
+        );
+        changedLineRanges = parseDiffRanges(lineDiff);
+        citationDiffSucceeded = true;
+      } catch {
+        // Citation hints are optional; the source-level stale result remains authoritative.
+      }
+    }
   } catch {
     // diff failed (e.g., baseline commit not found)
   }
@@ -1006,6 +1096,11 @@ async function cmdStatus(args) {
     }
   }
 
+  const citationIndexAvailable = state.citation_index_version === 1 && citationDiffSucceeded;
+  const citationRevalidationCandidates = citationIndexAvailable
+    ? affectedCitations(state.pages, changedLineRanges)
+    : [];
+
   const isFresh = !branchMismatch && diffSucceeded && changedFiles.length === 0 && affectedPages.length === 0;
   const result = {
     status: branchMismatch ? 'stale_cross_branch' : isFresh ? 'fresh' : 'stale',
@@ -1015,6 +1110,8 @@ async function cmdStatus(args) {
     commits_behind: commitCount,
     changed_files: changedFiles.length,
     affected_pages: affectedPages,
+    citation_index_available: citationIndexAvailable,
+    citation_revalidation_candidates: citationRevalidationCandidates,
     message: branchMismatch
       ? `Branch mismatch: expected ${state.git.branch}, on ${currentBranch}`
       : isFresh

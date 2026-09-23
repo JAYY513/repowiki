@@ -142,6 +142,7 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 
 1. 运行 `repowiki status --json` → 取 `affected_pages`：非空 = 唯一重生集合，禁止扩大到全量；空集（`[]`）= 零写入，直接跳过 4a/4b 进入 link 自查（只读）与完成报告。
 2. 重生成范围 = `affected_pages` 本体 + `modules` 命中受影响模块的文章 + 这些文章的祖先文章（summary 传播）；祖先文章只重写综述段落与 `## 更新摘要`，正文其余节逐字保留。
+   - 引注定位：`status --json` 中 `citation_index_available: true` 时，用 `citation_revalidation_candidates` 缩小**行号锚点复核**范围；`changed_lines` 核对变更 hunk 是否仍支持结论，`line_shift` 核对原代码是否仅因插入/删除而移动并更新行号。该列表不是语义影响全集：仍须检查 `affected_pages` 的相关 diff 对结论的语义影响，不得因引用未列入候选就认定页面无影响。索引不可用时回退原文件级核查。
 3. 断点续跑：`run.json` 的 `written_pages` 已写页一律跳过（即使仍在 `affected_pages` 内），只处理未完成页；崩溃遗留页面不触发人工保护。
 4. 跳过上报：`protected: true` 与 hash 不一致（疑似人工修改）的页面默认跳过、不写入，并在完成报告中逐页列出（给出 `--force` 出路），禁止静默。
 

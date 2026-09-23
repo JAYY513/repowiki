@@ -108,6 +108,8 @@ $ repowiki status --quiet
 fresh
 ```
 
+When a baseline includes citation references, stale `--json` output also includes `citation_index_available` and `citation_revalidation_candidates` (page, source, line range, and reason). These are line-anchor review hints, not a complete semantic-impact set; `affected_pages` remains the regeneration scope.
+
 **`repowiki validate`** — the OKF bundle checks out clean:
 
 ```

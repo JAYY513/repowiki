@@ -108,6 +108,8 @@ $ repowiki status --quiet
 fresh
 ```
 
+基线含引注索引时，stale 的 `--json` 结果还会给出 `citation_index_available` 与 `citation_revalidation_candidates`（页面、源码、行范围和原因）。它们只提示行号锚点复核，不代表完整的语义影响范围；重生成范围仍以 `affected_pages` 为准。
+
 **`repowiki validate`** —— OKF bundle 校验零错误零警告：
 
 ```
