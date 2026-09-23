@@ -962,7 +962,7 @@ async function cmdStatus(args) {
   try {
     const baselineCommit = state.git.commit;
     const diffOutput = execSync(
-      `git diff --name-status -M "${baselineCommit}"..HEAD`,
+      `git -c core.quotePath=false diff --name-status -M "${baselineCommit}"..HEAD`,
       { encoding: 'utf-8', cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim();
 
