@@ -338,7 +338,64 @@ function* walkDir(rootDir, excludePatterns) {
   }
 }
 
-// ─── Frontmatter parser ─────────────────────────────────────────────────────
+// ─── _module.yaml mini parser/writer (Qoder-compatible subset) ───────────────
+// Format (subset of Qoder's _module.yaml): schema_version/title/scope/source_files
+// plus lists depends_on[]/related_to[] (each item: string or {path}) and children[].
+
+function parseModuleYaml(content) {
+  if (!content) return null;
+  const lines = String(content).split('\n');
+  const out = { scope: [], source_files: [], depends_on: [], related_to: [], children: [] };
+  let section = null;
+  for (const raw of lines) {
+    const line = raw.replace(/\r$/, '');
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    const indent = line.length - line.trimStart().length;
+    const trimmed = line.trim();
+    if (indent === 0 && trimmed.includes(':')) {
+      const key = trimmed.slice(0, trimmed.indexOf(':')).trim();
+      const val = trimmed.slice(trimmed.indexOf(':') + 1).trim();
+      if (['scope', 'source_files', 'depends_on', 'related_to', 'children'].includes(key)) {
+        section = key;
+        if (val && val !== '[]') out[key].push(val.replace(/^["']|["']$/g, ''));
+      } else {
+        section = null;
+        if (['schema_version', 'title', 'module_path'].includes(key)) out[key] = val.replace(/^["']|["']$/g, '');
+      }
+      continue;
+    }
+    if (section && trimmed.startsWith('-')) {
+      let item = trimmed.replace(/^-\s*/, '').trim();
+      const m = item.match(/^path:\s*(.+)$/) || item.match(/^\{\s*path:\s*([^}]+)\}$/);
+      if (m) item = m[1].trim().replace(/^["']|["']$/g, '');
+      out[section].push(item.replace(/^["']|["']$/g, ''));
+    }
+  }
+  return out;
+}
+
+function writeModuleYaml(data) {
+  const list = (items) => (items && items.length ? items.map((i) => `    - ${i}`).join('\n') : '    []');
+  const rel = (items) => {
+    if (!items || !items.length) return '    []';
+    return items.map((i) => (/^[\w\-/]+$/.test(i) ? `    - path: ${i}` : `    - \"${i}\"`)).join('\n');
+  };
+  return [
+    'schema_version: 1',
+    `title: ${data.title || ''}`,
+    'scope:',
+    list(data.scope),
+    'source_files:',
+    list(data.source_files),
+    'depends_on:',
+    rel(data.depends_on),
+    'related_to:',
+    rel(data.related_to),
+    'children:',
+    list(data.children),
+    '',
+  ].join('\n');
+}
 
 function parseFrontmatter(content) {
   if (!content || !content.startsWith('---')) return null;
@@ -595,7 +652,7 @@ function collectWikiMarkdown(wikiDir) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(fullPath, prefix + entry.name + '/');
-      } else if (entry.name.endsWith('.md')) {
+      } else if (entry.name.endsWith('.md') || entry.name === '_module.yaml') {
         mdFiles.push({ fullPath, relPath: prefix + entry.name });
       }
     }
@@ -614,16 +671,26 @@ function sourcesForPage(relPath, plan) {
     }
   };
 
+  // Custom knowledge dirs (top-level single-file topics): plan.custom[] with dir/scope
+  const customs = Array.isArray(plan.custom) ? plan.custom : [];
+  for (const c of customs) {
+    if (!c || typeof c !== 'object') continue;
+    const dir = c.dir || c.slug;
+    if (dir && rp.startsWith(`knowledge/${dir}/`)) {
+      addAll(c.source_files);
+      addAll(c.scope);
+    }
+  }
+
   for (const mod of plan.modules) {
     if (!mod || typeof mod !== 'object') continue;
     const pages = Array.isArray(mod.pages) ? mod.pages : [];
     const hitPage = pages.some((p) => p === rp || (typeof p === 'string' && p.replace(/^\.\//, '') === rp));
     const dir = mod.dir || mod.slug;
-    const hitFile = Boolean(dir) && (rp === `knowledge/${dir}.md` || rp === `knowledge/${dir}/README.md`);
     const hitDir = Boolean(dir) && rp.startsWith(`knowledge/${dir}/`);
     const slug = mod.slug;
     const hitLegacy = Boolean(slug) && (rp === `${slug}/overview.md` || rp.startsWith(`${slug}/`));
-    if (hitPage || hitFile || hitDir || hitLegacy) {
+    if (hitPage || hitDir || hitLegacy) {
       addAll(mod.source_files);
       addAll(mod.scope);
     }
@@ -637,7 +704,10 @@ function sourcesForPage(relPath, plan) {
       addAll(art.scope);
       for (const ms of (Array.isArray(art.modules) ? art.modules : [])) {
         const mod = plan.modules.find((m) => m && m.slug === ms);
-        if (mod) addAll(mod.scope);
+        if (mod) {
+          addAll(mod.source_files);
+          addAll(mod.scope);
+        }
       }
     }
   }
@@ -652,13 +722,26 @@ function buildPagesMap(root) {
 
   const plan = readJson(path.join(repowikiDir(root), 'plan.json'));
   const mdFiles = collectWikiMarkdown(wikiDir);
+  // _module.yaml overlay: bundle-side scope/source_files enrich plan-derived sources
+  const yamlByDir = new Map();
+  for (const f of mdFiles) {
+    const m = f.relPath.match(/^knowledge\/([^/]+)\/_module\.yaml$/);
+    if (!m) continue;
+    const parsed = parseModuleYaml(readUtf8(f.fullPath));
+    if (parsed) yamlByDir.set(m[1], parsed);
+  }
   for (const f of mdFiles) {
     // log.md is runtime-ish output; still track hash for protection consistency
     const contentHash = sha256OfFile(f.fullPath) || '';
-    pages[f.relPath] = {
-      sources: sourcesForPage(f.relPath, plan),
-      content_hash: contentHash,
-    };
+    const sources = sourcesForPage(f.relPath, plan);
+    const kd = f.relPath.match(/^knowledge\/([^/]+)\//);
+    if (kd && yamlByDir.has(kd[1])) {
+      const y = yamlByDir.get(kd[1]);
+      for (const s of (y.source_files || []).concat(y.scope || [])) {
+        if (typeof s === 'string' && s && !sources.includes(s)) sources.push(s);
+      }
+    }
+    pages[f.relPath] = { sources, content_hash: contentHash };
   }
   return { pages, pageCount: mdFiles.length, plan };
 }
@@ -972,7 +1055,7 @@ async function cmdValidate(args) {
     return 1;
   }
 
-  // Collect all markdown files
+  // Collect all markdown files (+ _module.yaml metadata, Qoder-compatible)
   const mdFiles = [];
   function collectMd(dir, prefix) {
     let entries;
@@ -983,7 +1066,7 @@ async function cmdValidate(args) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         collectMd(fullPath, prefix + entry.name + '/');
-      } else if (entry.name.endsWith('.md')) {
+      } else if (entry.name.endsWith('.md') || entry.name === '_module.yaml') {
         mdFiles.push({ fullPath, relPath: prefix + entry.name });
       }
     }
@@ -1007,7 +1090,8 @@ async function cmdValidate(args) {
   }
 
   // Directory conventions are checked after frontmatter parsing (knowledge
-  // module files carry `module` + category segments; aggregate dirs use README.md).
+  // module directories anchor on a card with `dimension: overview`).
+  // Note: _module.yaml-only dirs have no md, so collect dirs by filesystem walk too.
   const dirs = new Set();
   for (const f of mdFiles) {
     const dir = path.dirname(f.relPath);
@@ -1015,20 +1099,33 @@ async function cmdValidate(args) {
       dirs.add(dir);
     }
   }
+  try {
+    const walkDirs = (dir, prefix) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory()) {
+          const rel = prefix + e.name;
+          dirs.add(rel);
+          walkDirs(path.join(dir, e.name), rel + '/');
+        }
+      }
+    };
+    walkDirs(wikiDir, '');
+  } catch { /* ignore */ }
 
   // Validate each file's frontmatter
   const parsedFields = new Map(); // relPath -> frontmatter fields (page-level files)
   for (const f of mdFiles) {
+    // _module.yaml is module metadata (Qoder-compatible), validated separately below
+    if (f.relPath.endsWith('/_module.yaml') || f.relPath === '_module.yaml') continue;
     const content = readUtf8(f.fullPath);
     if (!content) {
       errors.push({ file: f.relPath, field: null, message: 'file is empty or unreadable' });
       continue;
     }
-
-    const parsed = parseFrontmatter(content);
     const isRootIndex = f.relPath === 'index.md';
     const isLog = f.relPath === 'log.md';
 
+    const parsed = parseFrontmatter(content);
     if (!parsed) {
       // log.md is the generation log; it intentionally has no frontmatter
       if (!isLog) {
@@ -1040,14 +1137,14 @@ async function cmdValidate(args) {
     const ff = parsed.fields;
 
     if (isRootIndex) {
-      // Root index.md: okf_version/description plus aggregated public fields
-      const allowedRootFields = new Set(['okf_version', 'description', 'status', 'type', 'generated', 'source_commit', 'generator']);
+      // Root index.md: only okf_version and description allowed
+      const allowedRootFields = new Set(['okf_version', 'description']);
       for (const key of Object.keys(ff)) {
         if (!allowedRootFields.has(key)) {
           warnings.push({
             file: f.relPath,
             field: key,
-            message: `field '${key}' not allowed in root index.md (only okf_version, description, status, type, generated, source_commit, generator)`,
+            message: `field '${key}' not allowed in root index.md (only okf_version, description)`,
           });
         }
       }
@@ -1056,24 +1153,9 @@ async function cmdValidate(args) {
 
     if (isLog) continue; // log.md content is free-form
 
-    const inKnowledge = f.relPath.startsWith('knowledge/');
-    const inContent = f.relPath.startsWith('content/');
-    const inKnowledgeAggregate = inKnowledge && f.relPath.endsWith('/README.md');
-    const isModuleFile = inKnowledge && !inKnowledgeAggregate;
-
     parsedFields.set(f.relPath, ff);
 
-    if (isModuleFile) {
-      // Module file (one module per file): description + module required; no type/dimension/status/triggers
-      for (const rf of ['description', 'module']) {
-        if (ff[rf] === undefined || ff[rf] === '') {
-          errors.push({ file: f.relPath, field: rf, message: `missing required field '${rf}'` });
-        }
-      }
-      continue;
-    }
-
-    // Page-level files (articles + knowledge aggregate READMEs)
+    // Page-level files
     const requiredFields = ['status', 'type', 'triggers', 'description'];
     for (const rf of requiredFields) {
       if (ff[rf] === undefined || ff[rf] === '') {
@@ -1087,9 +1169,12 @@ async function cmdValidate(args) {
       errors.push({ file: f.relPath, field: 'status', message: `invalid status '${ff.status}' (must be stable|draft|deprecated)` });
     }
 
-    // Validate type value by family (articles only; knowledge module files handled above)
+    // Validate type value by family (knowledge cards vs articles)
+    const inKnowledge = f.relPath.startsWith('knowledge/');
+    const inContent = f.relPath.startsWith('content/');
+    const knowledgeTypes = ['module'];
     const articleTypes = ['overview', 'getting_started', 'domain', 'deep_dive', 'developer_guide'];
-    const allowedTypes = inContent ? articleTypes : articleTypes.concat(['module']);
+    const allowedTypes = inKnowledge ? knowledgeTypes : (inContent ? articleTypes : knowledgeTypes.concat(articleTypes));
     if (ff.type && !allowedTypes.includes(ff.type)) {
       errors.push({
         file: f.relPath,
@@ -1098,41 +1183,46 @@ async function cmdValidate(args) {
       });
     }
 
+    // Knowledge cards carry a language-independent dimension field
+    if (inKnowledge && (ff.dimension === undefined || ff.dimension === '')) {
+      warnings.push({ file: f.relPath, field: 'dimension', message: 'knowledge card is missing the dimension field' });
+    }
+
     // Check triggers is a non-empty array or value
     if (ff.triggers !== undefined && ff.triggers !== '') {
       if (Array.isArray(ff.triggers) && ff.triggers.length === 0) {
         warnings.push({ file: f.relPath, field: 'triggers', message: 'triggers is an empty array' });
       }
     }
-
-    // Module files: validate segment category markers (## title <!-- category:x -->)
-    if (isModuleFile) {
-      const body = parsed.body || '';
-      const scannable = String(body).replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
-      const validCategories = new Set(['overview', 'architecture_design', 'tech_stack', 'coding_conventions', 'unique_setup_and_commands']);
-      const seen = [];
-      const catRegex = /^##\s+.+?<!--\s*category:([A-Za-z0-9_-]+)\s*-->/gm;
-      let m;
-      while ((m = catRegex.exec(scannable)) !== null) seen.push(m[1]);
-      if (!seen.includes('overview')) {
-        errors.push({ file: f.relPath, field: 'category', message: 'module file is missing required <!-- category:overview --> segment' });
-      }
-      for (const c of seen) {
-        if (!validCategories.has(c) && !/^[a-z][a-z0-9_]*$/.test(c)) {
-          errors.push({ file: f.relPath, field: 'category', message: `invalid category '${c}'` });
-        }
-      }
-    }
   }
 
-  // Directory conventions
+  // Directory conventions (+ _module.yaml per knowledge dir, Qoder-compatible)
   for (const d of dirs) {
     if (d === 'knowledge' || d === 'content') continue; // family containers need no anchor
     if (d.startsWith('knowledge/')) {
-      // Parent-module aggregate: README.md carries the emergent knowledge
-      const hasAggregate = mdFiles.some((f) => f.relPath === `${d}/README.md`);
-      if (!hasAggregate) {
-        warnings.push({ file: `${d}/`, field: null, message: `knowledge aggregate directory ${d} has no README.md` });
+      const hasOverviewCard = mdFiles.some((f) => path.dirname(f.relPath) === d && parsedFields.get(f.relPath)?.dimension === 'overview');
+      if (!hasOverviewCard) {
+        warnings.push({ file: `${d}/`, field: null, message: `knowledge module directory ${d} has no card with dimension: overview` });
+      }
+      // Custom single-file topics carry kind/name/category frontmatter, no _module.yaml needed
+      const mdInDir = mdFiles.filter((f) => path.dirname(f.relPath) === d && f.fullPath.endsWith('.md'));
+      const isCustomDir = mdInDir.length === 1 && (() => {
+        const ff = parsedFields.get(mdInDir[0].relPath);
+        return ff && (ff.kind !== undefined || ff.category !== undefined);
+      })();
+      if (!isCustomDir) {
+        const yamlEntry = mdFiles.find((f) => f.relPath === `${d}/_module.yaml`);
+        if (!yamlEntry) {
+          warnings.push({ file: `${d}/`, field: null, message: `knowledge directory ${d} has no _module.yaml` });
+        } else {
+          const ym = parseModuleYaml(readUtf8(yamlEntry.fullPath));
+          if (!ym || !ym.title) {
+            warnings.push({ file: yamlEntry.relPath, field: 'title', message: '_module.yaml is missing the title field' });
+          }
+          if (!ym || (!((ym.scope || []).length) && !((ym.source_files || []).length))) {
+            warnings.push({ file: yamlEntry.relPath, field: 'scope', message: '_module.yaml has empty scope and source_files' });
+          }
+        }
       }
       continue;
     }
@@ -1143,7 +1233,6 @@ async function cmdValidate(args) {
     }
   }
 
-  // Check bundle relative links and build the link graph for reachability
   const resolveBundleTarget = (fromRel, rawLink) => {
     let target = String(rawLink).trim();
     const hashIdx = target.indexOf('#');
@@ -1161,6 +1250,7 @@ async function cmdValidate(args) {
 
   const linkTargets = new Map(); // relPath -> Set of resolved bundle-relative targets
   for (const f of mdFiles) {
+    if (f.relPath.endsWith('/_module.yaml') || f.relPath === '_module.yaml') continue; // metadata has no links
     const content = readUtf8(f.fullPath);
     if (!content) continue;
 
@@ -1205,6 +1295,7 @@ async function cmdValidate(args) {
     }
     for (const f of mdFiles) {
       if (f.relPath === 'index.md' || f.relPath === 'log.md') continue;
+      if (f.relPath.endsWith('/_module.yaml') || f.relPath === '_module.yaml') continue; // metadata, not pages
       if (!visited.has(f.relPath)) {
         warnings.push({ file: f.relPath, field: null, message: 'page not reachable from index.md' });
       }
@@ -1222,8 +1313,8 @@ async function cmdValidate(args) {
     }
     for (const mod of (Array.isArray(plan.modules) ? plan.modules : [])) {
       const dir = mod && (mod.dir || mod.slug);
-      if (dir && !fs.existsSync(path.join(wikiDir, 'knowledge', `${dir}.md`)) && !fs.existsSync(path.join(wikiDir, 'knowledge', dir, 'README.md')) && !fs.existsSync(path.join(wikiDir, 'knowledge', dir))) {
-        warnings.push({ file: 'plan.json', field: 'modules', message: `planned module file not found: knowledge/${dir}.md` });
+      if (dir && !fs.existsSync(path.join(wikiDir, 'knowledge', dir))) {
+        warnings.push({ file: 'plan.json', field: 'modules', message: `planned module directory not found: knowledge/${dir}/` });
       }
     }
   }

@@ -9,7 +9,7 @@ description: >
 
 ## 概述
 
-自动从项目代码库分析模块结构，产出两族 OKF bundle（`docs/repowiki/`）：`knowledge/` 一模块一文件（段内 category）+ `content/` 文章树（含 repo 级收敛卡），供任意支持 `.agents` 标准的 agent 读取。写作体系对齐 Qoder 产物（一模块一文件 + `<!-- category:x -->` 五段 / 五类文章 / cite 引注 / 图表来源）。
+自动从项目代码库分析模块结构，产出两族 OKF bundle（`docs/repowiki/`）：`knowledge/` 一模块一目录（五维卡 + `_module.yaml`）+ 顶层自定义主题卡 + `content/` 文章树，供任意支持 `.agents` 标准的 agent 读取。写作体系对齐 Qoder 产物（一模块一目录五卡 / 自定义独立目录 / 五类文章 / cite 引注 / 图表来源）。
 
 ## 流水线（Step 0 接线 + 7 步生成）
 
@@ -18,9 +18,9 @@ description: >
 | 0 | **wire** | `repowiki init`（幂等，每次运行先执行） | `AGENTS.md` 注入 `## repowiki` 分区 + 纪律句 + state 基线 |
 | 1 | **scan** | `repowiki scan` | `.repowiki/snapshot.json` + 规模统计 |
 | 2 | **budget** | 主 agent 直做（禁派生） | 规模档位 + 文章 caps |
-| 3 | **plan** | 主 agent 直做（禁派生） | 模块划分 + 模块文件 + 文章大纲 → `.repowiki/plan.json`（v2） |
-| 4 | **generate** | 按模块并行（执行粒度见 Step 4） | 4a 逐模块文件 → `knowledge/`；4b 自底向上文章 → `content/` |
-| 5 | **link** | 主 agent 直做（禁派生） | 模块互引、父→子文章、index 清单、可达性 |
+| 3 | **plan** | 主 agent 直做（禁派生） | 模块划分 + 知识卡 + 自定义主题 + 文章大纲 → `.repowiki/plan.json`（v2） |
+| 4 | **generate** | 按模块并行（执行粒度见 Step 4） | 4a 逐模块知识卡 → `knowledge/`；4b 自底向上文章 → `content/` |
+| 5 | **link** | 主 agent 直做（禁派生） | 卡片导航、父→子文章、index 清单、可达性 |
 | 6 | **validate** | 主 agent 直做（跑 `repowiki validate` 并亲自复核报告） | OKF 校验报告（含可达性与 plan 一致性） |
 | 7 | **finalize** | 主 agent 直做（跑 `repowiki state --update`） | `state.json` + `log.md` + 完成报告 |
 
@@ -74,9 +74,10 @@ agent 产出 `.repowiki/plan.json`（v2）：
 
 字段约定：
 
-- `modules[]`：`slug`（ascii 全局唯一）+ `title`（显示名，跟随项目语言）+ `dir`（模块文件名，`knowledge/<dir>.md`，规范化自 title；父模块聚合时为目录名，配 `README.md`）+ `scope`（源文件 glob）+ 可选 `source_files`（显式源清单，无则回退 `scope`，供模块文件 frontmatter 与 state sources 推导）。
+- `modules[]`：`slug`（ascii 全局唯一）+ `title`（显示名，跟随项目语言）+ `dir`（`knowledge/` 下的目录名，规范化自 title）+ `scope`（源文件 glob）+ 可选 `source_files`（显式源清单，无则回退 `scope`，供 `_module.yaml` 与 state sources 推导）。
 - `articles[]`：`slug` + `title` + `file`（bundle 相对路径，规范化自 title）+ `type`（五类之一）+ `modules`（**非空**，覆盖的模块 slug；overview 类为全部模块）+ `parent`（可选，父文章 slug）+ `scope`（可选，额外源 glob，如 README）。
 - `budget`：Step 2 的档位与 caps，落盘备查。
+- `custom[]`（可选）：顶层自定义主题（`dir`/`scope`/`source_files`/`category` + 显示名），供 state `sources` 与 status `affected_pages` 推导。
 
 **大纲规划规则**：
 
@@ -106,28 +107,28 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 **执行粒度（与 budget 档位联动）**
 
 - `扁平单层`：主 agent 直写全部卡与文章，禁止派生子 agent。agent 数恒为 1。
-- `模块树`及以上：只按模块并行——每模块一 agent，一次写完该模块文件全部 category 段（含自定义段）与该模块归属的文章草稿；禁止按段/按维度/按文章拆分派生（agent 数 O(模块)，禁 O(模块×维度) fan-out）。
+- `模块树`及以上：只按模块并行——每模块一 agent，一次写完该模块全部维度卡（含自定义卡）与该模块归属的文章草稿；禁止按卡/按维度/按文章拆分派生（agent 数 O(模块)，禁 O(模块×维度) fan-out）。
 - link（Step 5）/ validate 报告复核（Step 6）/ finalize（Step 7）一律主 agent 直做，禁止外包。
-- 并行 task 间经 `local://` 传 snapshot/plan 摘要（模块 slug→scope/dir/file、文章 parent/modules/file），不各自重读 `snapshot.json`/`plan.json` 全文。
+- 并行 task 间经 `local://` 传 snapshot/plan 摘要（模块 slug→scope/dir、文章 parent/modules/file），不各自重读 `snapshot.json`/`plan.json` 全文。
 
-**4a 模块文件（一模块一文件，段内 category）**
+**4a 知识卡（逐模块一批）**
 
 1. 读取模块内关键文件（入口、类型定义、配置、README）
-2. 五维知识字段 → 映射到段内 `## 标题 <!-- category:x -->`（缺段省略）：
+2. 五维知识字段 → 映射到五卡（缺卡省略）：
 
-| 五维字段 | 目标段（category） |
+| 五维字段 | 目标卡（dimension） |
 |---|---|
-| name + 职责边界 | `## 概述 <!-- category:overview -->`（首段必填） |
-| architecture_design + 依赖 | `## 架构设计 <!-- category:architecture_design -->` |
-| tech_stack | `## 技术栈 <!-- category:tech_stack -->`（仅非默认选型） |
-| coding_conventions | `## 编码规范 <!-- category:coding_conventions -->`（≤6 条、≥2 处验证） |
-| unique_setup_and_commands | `## 特殊配置与命令 <!-- category:unique_setup_and_commands -->`（仅非显而易见） |
+| name + 职责边界 | 概述（overview） |
+| architecture_design + 依赖 | 架构设计（architecture） |
+| tech_stack | 技术栈（tech_stack，仅非默认选型） |
+| coding_conventions | 编码规范（coding_conventions，≤6 条、≥2 处验证） |
+| unique_setup_and_commands | 特殊配置与命令（setup，仅非显而易见） |
 
-3. **自定义维度评估**（开放分类扩展机制）：五维映射后，检查模块是否存在五维无法承载、且对任务意图有高命中率的知识主题——典型如数据模型、协议契约、错误语义、依赖治理、故障排查。命中则增建自定义段：
-   - `## 语义化标题 <!-- category:<ascii> -->`（如 `dependency_management`），语义稳定、同 bundle 内不冲突
-   - 每模块 ≤2 个，宁缺毋滥；无真实信号则不建
-4. 写入 `docs/repowiki/knowledge/<dir>.md`（frontmatter 仅 `description` + `module`/`source_files`，见 output-spec §2.1）；文件末尾可选 `## 关系`三向段
-5. 同文件段内直达，无需卡片导航；跨模块引用链到对方模块文件（可带段锚）
+3. **自定义主题评估**（Qoder 式独立主题）：五维映射后，检查是否存在五维无法承载、且对任务意图有高命中率的知识主题——典型如数据模型、协议契约、错误语义、依赖治理、故障排查。命中则建顶层独立主题：
+   - 落盘 `knowledge/<语义化标题>/<语义化标题>.md`（跟随项目文档语言）；frontmatter 用 `kind` / `name` / `category` / `scope` / `source_files`（§2.2），不套知识卡字段
+   - 每主题 ≤1 文件，宁缺毋滥；无真实信号则不建
+4. 写 `knowledge/<dir>/_module.yaml`（`title` / `scope` / `source_files` / `depends_on` / `related_to` / `children`；关系只进 yaml 不进正文）+ 写入各卡（完整 frontmatter：`dimension` + **维度级 triggers**）
+5. `概述.md` 必须含卡片导航（链接同目录其他卡）
 
 **4b 文章（自底向上）**
 
@@ -155,24 +156,23 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 
 主 agent 直做（禁派生），补全并自查链接（bundle 相对路径）：
 
-- 跨模块引用 → 对方模块文件（可带段锚，如 `knowledge/支付模块.md#架构设计`）
+- 概述卡 → 同目录其他卡的卡片导航
 - 父文章 → 直接子文章
-- `index.md` → 每个模块文件 + 每篇顶层文章
-- 全文可达性：除 index.md 与 log.md 外，所有页面可从 index.md 到达
+- `index.md` → 每个模块的概述卡 + 每篇顶层文章
+- 全文可达性：除 index.md、`log.md`、`_module.yaml` 外，所有页面可从 index.md 到达
 
 #### Step 6: validate
 
 运行 `repowiki validate` 校验 OKF bundle：
 
-- frontmatter 必填字段（文章：status/type/triggers/description；模块文件：description + module）
-- type 值域按族（`content/` → 五类；`knowledge/` 单文件不再校验 type/dimension）
-- category 段标记（`## 标题 <!-- category:x -->` 值域 + `overview` 首段必填）
-- status 值域（stable|draft|deprecated；模块文件无 status 时继承 index 归集值）
-- 根 index.md 允许 okf_version/description + 公共归集字段
-- 知识模块文件存在性（`knowledge/<dir>.md` 或聚合目录 `README.md` 须存在其一）
+- frontmatter 必填字段（知识卡：status/type/dimension/triggers/description；自定义主题卡：kind/name/category/scope；文章：status/type/triggers/description）
+- type/dimension 值域按族（`knowledge/` → module + dimension；`content/` → 五类）
+- status 值域（stable|draft|deprecated）
+- 根 index.md 仅允许 okf_version/description
+- 知识模块目录锚（存在 `dimension: overview` 的卡）+ `_module.yaml` 存在性与 title/scope 非空
 - bundle 内相对链接可达（锚点与百分号编码已归一；代码块与行内示例链接跳过）
 - 链接可达性：所有页面可从 index.md 到达
-- plan.json（v2）一致性：计划文章文件与模块文件存在
+- plan.json（v2）一致性：计划文章文件与模块目录存在（含 `custom[]` 自定义主题目录）
 - log.md 豁免 frontmatter 检查
 
 不合格项回炉修正（P0 只报不修，agent 根据报告手动修正）。
@@ -182,8 +182,7 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 运行 `repowiki state --update` 写入 / 刷新 `state.json`（CLI 已实现）：
 
 - 当前 git commit/branch（供 `status` 做新鲜度基线）
-- 扫描 `docs/repowiki/` 全部页面，写入 `pages`：每页 `content_hash`；若存在 `.repowiki/plan.json`（v2），模块文件按 `source_files`（无则 `scope`）、文章按 `articles[].modules` 并集 ∪ 显式 `scope` 填 `sources`（一模块一页）
-- `snapshot_digest`（来自 `snapshot.json`）
+- 扫描 `docs/repowiki/` 全部页面，写入 `pages`：每页 `content_hash`；若存在 `.repowiki/plan.json`（v2），按模块 `scope`（+ `_module.yaml` 补强）与 `articles[].modules` / `custom[].scope` 填 `sources`
 - `last_run`（phase=`finalize`，status=`success`）；若有 `.repowiki/run.json` 则读取其 `started_at`，成功后删除 `run.json`
 
 写出 `log.md`（生成日志：日期、模式、提交、范围、validate 结果）。
@@ -194,13 +193,13 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 
 ### 人工修改保护
 
-- 所有受管页面记录 `content_hash`（模块文件与文章同规则）
+- 所有受管页面记录 `content_hash`（知识卡与文章同规则；`_module.yaml` 只做存在性与 title/scope 校验，不进 hash 保护）
 - 生成前逐页比对；hash 不一致的页面默认跳过
 - 报告跳过的页面供用户确认
 - `protected: true` 显式锁定（`--force` 可覆盖）
 
 ### 上下文防爆
-- 执行粒度收敛即防爆手段：单模块单 agent 单批次内写完该模块文件全部 category 段（禁按段拆分）；扁平单层全程单 agent。
+- 执行粒度收敛即防爆手段：单模块单 agent 单批次内写完该模块全部卡（禁按卡拆分）；扁平单层全程单 agent。
 - 一次只处理一个模块批次
 - 批次间清理上下文
 - 单模块源文件过多 → 优先读入口文件、类型定义、配置，抽样读实现
@@ -225,4 +224,4 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 
 ## 参考
 
-- [输出规格](references/output-spec.md) — 目录组织、frontmatter、模块文件与文章原型、命名与链接纪律
+- [输出规格](references/output-spec.md) — 目录组织、frontmatter、知识卡与文章原型、命名与链接纪律

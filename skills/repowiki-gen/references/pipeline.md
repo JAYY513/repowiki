@@ -54,7 +54,7 @@
     {
       "slug": "snake_case",
       "title": "显示名（项目文档语言）",
-      "dir": "模块文件名（规范化自 title，空格→-；落盘 knowledge/<dir>.md，父聚合时为目录名）",
+      "dir": "knowledge/ 下的目录名（规范化自 title，空格→-）",
       "scope": ["src/path/**"],
       "needs_further_planning": true,
       "guidance": "下一层拆分轴建议"
@@ -81,12 +81,12 @@
 
 ### 执行粒度
 
-- 只按模块并行：每模块一 agent，一次写完该模块文件全部 category 段；禁止按段/按维度拆分派生。
-- 并行 task 通过 `local://` 接收 snapshot/plan 摘要（模块 slug→scope/dir/file），不各自重读 `snapshot.json`/`plan.json` 全文。
+- 只按模块并行：每模块一 agent，一次写完该模块全部维度卡；禁止按卡/按维度拆分派生。
+- 并行 task 通过 `local://` 接收 snapshot/plan 摘要（模块 slug→scope/dir），不各自重读 `snapshot.json`/`plan.json` 全文。
 
 ### 定位
 
-对每个模块产出一文件结构化知识，直接落为 `knowledge/<dir>.md`（一模块一文件；`dir` 即文件名）。叶子模块从源码抽取；父模块用目录+`README.md` 聚合，只写跨子模块才存在的东西（涌现知识）。
+对每个模块产出结构化知识，直接落为 `knowledge/<dir>/` 下的五维知识卡。叶子模块从源码抽取；父模块从子模块摘要合成"涌现知识"（只有跨子模块才存在的东西）。自定义主题独立成顶层目录单文件（见本节末）。
 
 ### 叶子模块（leaf）
 
@@ -96,21 +96,27 @@
 
 ### 父模块（aggregate）
 
-- 目录 `knowledge/<dir>/` + `README.md` 写涌现知识（编排/契约/共享设施）；子模块各为同目录下单文件。
+- 目录 `knowledge/<dir>/` 下同样落 5 卡（`概述.md` 写涌现知识：编排/契约/共享设施）；子模块各为同级子目录（各带 `_module.yaml` + 5 卡）。
 - 如果子模块摘要已覆盖全部内容，只产出最小字段，不许灌水
 - 工具调用应罕见（优先读子模块摘要而非源码）
 
-### 五维知识字段 → 段内 category 映射
+### 五维知识字段 → 五卡映射
 
-| 字段 | 必填 | 目标段（category） | 说明 |
+| 字段 | 必填 | 目标卡（dimension） | 说明 |
 |---|---|---|---|
-| name + 职责边界 | 是 | `## 概述 <!-- category:overview -->` | 语义化模块名 + 做什么/不做什么（首段必填） |
-| architecture_design | 是 | `## 架构设计 <!-- category:architecture_design -->` | 内部结构/分层/边界 |
-| tech_stack | 否 | `## 技术栈 <!-- category:tech_stack -->` | 仅非默认且具解释力的技术选型 |
-| unique_setup_and_commands | 否 | `## 特殊配置与命令 <!-- category:unique_setup_and_commands -->` | 仅非显而易见的步骤/命令 |
-| coding_conventions | 否 | `## 编码规范 <!-- category:coding_conventions -->` | ≤6 条，每条需在 ≥2 处验证过 |
+| name + 职责边界 | 是 | 概述.md（overview） | 语义化模块名 + 做什么/不做什么（锚文档） |
+| architecture_design | 是 | 架构设计.md（architecture） | 内部结构/分层/边界 |
+| tech_stack | 否 | 技术栈.md（tech_stack） | 仅非默认且具解释力的技术选型 |
+| unique_setup_and_commands | 否 | 特殊配置与命令.md（setup） | 仅非显而易见的步骤/命令 |
+| coding_conventions | 否 | 编码规范.md（coding_conventions） | ≤6 条，每条需在 ≥2 处验证过 |
 
-缺段省略，不建空段；自定义维度同为段（每模块 ≤2 个）。repo 级 tech_stack/setup（全仓非默认信号）不进模块文件，收敛为 `content/` 一类一文件（`scopes: ["**"]`，见 output-spec §1）。
+可选卡仅在字段非空时创建（宁缺毋滥）。
+
+### 自定义主题（Qoder 式顶层独立目录）
+
+- 判据同 SKILL 4a 第 3 条；落盘 `knowledge/<语义化标题>/<语义化标题>.md`，frontmatter 用 `kind` / `name` / `category` / `scope` / `source_files`。
+- 每主题 ≤1 文件；plan.json 记入 `custom[]`（`dir`/`scope`/`source_files`/`category`），供 state sources 与 status `affected_pages` 推导。
+- 关系如有，写进该目录 `_module.yaml`（可选；Qoder 实测自定义目录多无 yaml，无则跳过校验）。
 
 ### 接地规则
 
@@ -207,16 +213,16 @@
 |---|---|---|
 | docs/repowiki/ 存在 | error | 目录缺失 |
 | index.md 存在 | error | 路由入口缺失 |
-| frontmatter 必填字段 | error | 文章：status/type/triggers/description；模块文件：description + module（§2.1） |
-| status 值域 | error | stable/draft/deprecated（模块文件无 status 时继承 index 归集值） |
-| type 值域按族 | error | content/ → overview/getting_started/domain/deep_dive/developer_guide；knowledge/ 单文件不再校验 type/dimension |
-| category 段标记 | error | 模块文件 `## 标题 <!-- category:x -->` 的 x ∈ 五维 + 自定义 ascii；`overview` 首段必填 |
-| 根 index.md 字段 | warning | 允许 okf_version/description + 公共归集字段（status/generated/source_commit/generator/type），其他警告 |
-| 知识模块文件存在性 | warning | plan modules[].dir → `knowledge/<dir>.md` 或聚合目录 `knowledge/<dir>/README.md` 须存在其一 |
+| frontmatter 必填字段 | error | 知识卡：status/type/dimension/triggers/description；自定义主题卡：kind/name/category/scope；文章：status/type/triggers/description |
+| status 值域 | error | stable/draft/deprecated |
+| type/dimension 值域按族 | error | knowledge/ 五维卡 → module + dimension；knowledge/ 自定义卡免检 type/dimension；content/ → 五类 |
+| 根 index.md 字段限制 | warning | 仅 okf_version/description |
+| 知识模块目录锚 | warning | knowledge/<dir>/ 需有 dimension: overview 的卡 |
+| _module.yaml | warning | 每 knowledge/ 目录一份；title 非空 + scope/source_files 至少其一非空；自定义单文件目录无 yaml 则跳过 |
 | 目录 index/overview（非两族目录） | warning | 其他子目录应有 index.md 或 overview.md |
 | bundle 相对链接 | warning | 目标文件须存在（锚点与百分号编码已归一；代码块与行内示例跳过） |
-| 链接可达性 | warning | 除 index.md/log.md 外所有页可从 index.md 到达 |
-| plan.json（v2）一致性 | warning | 计划文章文件与模块文件存在 |
+| 链接可达性 | warning | 除 index.md/log.md/_module.yaml 外所有页可从 index.md 到达 |
+| plan.json（v2）一致性 | warning | 计划文章文件、模块目录（含 custom[] 自定义主题目录）存在 |
 | log.md | 豁免 | 不做 frontmatter 检查 |
 | Mermaid 语法 | — | P0 不做校验 |
 
@@ -237,7 +243,7 @@
 {
   "pid": 12345,
   "phase": "generate",
-  "written_pages": ["knowledge/支付模块.md", "content/支付域/支付流程.md"],
+  "written_pages": ["knowledge/支付模块/概述.md", "content/支付域/支付流程.md"],
   "article_summaries": {
     "payment-flow": { "summary": "……", "key_topics": ["…"] }
   }
@@ -269,7 +275,7 @@ finalize 阶段写入：
   "generated_at": "ISO 8601",
   "git": { "commit": "<sha>", "branch": "main" },
   "pages": {
-    "knowledge/支付模块.md": {
+    "knowledge/支付模块/概述.md": {
       "sources": ["src/payment/**"],
       "content_hash": "<sha256>"
     },
@@ -290,7 +296,7 @@ finalize 阶段写入：
 }
 ```
 
-说明：`sources` 由 plan.json（v2）推导——模块文件 = `modules[].source_files`（无则回退 `scope`）∪ 文章显式 `scope`；文章 = `articles[].modules` 对应模块 scope 的并集 ∪ 文章显式 `scope`。`status` 的 `affected_pages` 据此计算（粒度一模块一页）。
+说明：`sources` 由 plan.json（v2）推导——知识卡 = 所属模块 scope（+ `_module.yaml` 补强）；自定义主题卡 = `custom[]` 的 scope/source_files；文章 = `articles[].modules` 对应模块 scope 的并集 ∪ 文章显式 `scope`。`status` 的 `affected_pages` 据此计算（卡级粒度）。
 
 ---
 
@@ -298,7 +304,7 @@ finalize 阶段写入：
 
 ### 结构字段（永远不翻译）
 
-- slug、scope、type、category、split_decision
+- slug、scope、type、dimension、category、split_decision
 - JSON key、标识符、仓库源码路径
 - 模块 slug（ascii）
 
@@ -307,7 +313,7 @@ finalize 阶段写入：
 - description、architecture_design
 - 文章正文、注释、error message
 - reasoning（JSON 中的推理字段）
-- bundle 内的文件名与 title 一律用项目文档语言（中文项目：CLI-工具.md、支付域/；英文项目：payment.md、payment/；空格→`-`）
+- bundle 内的文件名/目录名与 title 一律用项目文档语言（中文项目：概述.md、支付域/；英文项目：overview.md、payment/；空格→`-`）
 
 ### 语言配置
 

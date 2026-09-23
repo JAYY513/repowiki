@@ -1,10 +1,6 @@
 ---
 okf_version: 1
-description: repowiki 项目知识库：CLI 工具与生成技能两个模块文件，以及项目总览、快速开始、产物格式文章。
-status: stable
-generated: true
-source_commit: c0adebe
-generator: repowiki-gen
+description: repowiki 项目知识库：CLI 工具与生成技能两个模块的知识卡，以及项目总览、快速开始、产物格式文章。
 ---
 
 # repowiki 知识库
@@ -13,8 +9,8 @@ repowiki 把代码库变成一份写给 Agent 读的小型 wiki：零依赖 Node
 
 ## 模块知识
 
-- [CLI 工具](knowledge/CLI-工具.md) — 扫描 / 校验 / 状态基线命令行（单文件、零依赖）｜段：概述 · 架构设计 · 技术栈 · 编码规范 · 特殊配置与命令
-- [生成技能](knowledge/生成技能.md) — 驱动生成流水线的 agent 技能包｜段：概述 · 架构设计
+- [CLI 工具](knowledge/CLI-工具/概述.md) — 扫描 / 校验 / 状态基线命令行（单文件、零依赖）｜卡：概述 · 架构设计 · 技术栈 · 编码规范 · 特殊配置与命令
+- [生成技能](knowledge/生成技能/概述.md) — 驱动生成流水线的 agent 技能包｜卡：概述 · 架构设计
 
 ## 文章
 

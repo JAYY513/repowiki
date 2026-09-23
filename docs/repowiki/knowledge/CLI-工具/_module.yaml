@@ -1,0 +1,9 @@
+schema_version: 1
+title: CLI 工具
+scope:
+    - bin/**
+source_files: []
+depends_on:
+    - path: skill
+related_to: []
+children: []

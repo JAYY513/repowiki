@@ -33,7 +33,7 @@
 
 | 能力 | 说明 |
 |---|---|
-| **OKF bundle 产物** | 两族结构：`knowledge/` 一模块一文件（五维作段内 `<!-- category:x -->`）与 `content/` 文章；文章页携带 `status` / `type` / `triggers` / `description`，模块文件仅 `description` + `module` / `source_files`，公共字段归集于 `index.md` |
+| **OKF bundle 产物** | 两族结构：`knowledge/` 模块知识卡（一模块一目录五卡 + `_module.yaml`，另有顶层自定义主题卡）与 `content/` 文章；卡片/文章统一携带 `status` / `type` / `triggers` / `description` frontmatter |
 | **零依赖 CLI** | 单个 Node.js 文件，无依赖树——只需 Node ≥ 18 |
 | **新鲜度基线** | `state.json` 把 wiki 钉在某个提交上；CI 友好退出码（`0` 新鲜 · `10` 过期 · `11` 缺失） |
 | **幂等接线** | `repowiki init` 向 `AGENTS.md` 注入管理块——重跑即 no-op；手写 `## repowiki` 只补缺失声明行，其余原样保留 |
@@ -119,19 +119,23 @@ $ repowiki validate --json
 
 ```
 ├── knowledge/
-│   ├── CLI-工具.md              一模块一文件（概述 · 架构设计 · 技术栈 · 编码规范 · 特殊配置与命令五段）
-│   └── 生成技能.md              驱动流水线的技能模块
+│   ├── CLI-工具/              五维知识卡（概述 · 架构设计 · 技术栈 · 编码规范 · 特殊配置与命令）+ _module.yaml
+│   └── 生成技能/              驱动流水线的技能模块 + _module.yaml
 ├── content/                 项目总览 · 快速开始 · 产物格式
 └── log.md                   生成日志（模式、基线、覆盖率、validate 结果）
 ```
 
-模块文件带这样的 frontmatter——公共字段归集于 `index.md`，不再逐文件重复：
+每个页面都带这样的 frontmatter——读取侧正是靠它做命中匹配：
 
 ```markdown
 ---
+status: stable
+type: module
+dimension: overview
+triggers:
+  - CLI 命令
+  - repowiki 怎么用
 description: repowiki CLI 的定位与职责边界：init / scan / state / status / validate 五个子命令。
-module: cli
-source_files: ["bin/**"]
 ---
 ```
 
@@ -198,17 +202,13 @@ node repowiki/bin/repowiki.mjs status
 
 | 步 | 阶段 | 执行者 | 产出 |
 |:---:|---|---|---|
-| 0 | **wire** | `repowiki init` | `AGENTS.md` 接线 + state 基线 |
-| 1 | **scan** | `repowiki scan` | `.repowiki/snapshot.json` |
-| 2 | **budget** | agent | 规模档位：扁平 / 模块树 / 深度限制 |
-| 3 | **plan** | agent | 模块与页面规划 → `.repowiki/plan.json` |
-| 4 | **generate** | agent（分批） | 模块文件 → `knowledge/` · 文章 → `content/` |
+| 4 | **generate** | agent（分批） | 知识卡 → `knowledge/` · 文章 → `content/` |
 | 5 | **link** | agent | 页面间交叉链接 |
 | 6 | **validate** | `repowiki validate` | OKF 校验报告 |
 | 7 | **finalize** | `repowiki state --update` | `state.json`（页面映射 + 基线 + last_run）+ 完成报告 |
 
 ## 设计要点
-- **Route before body** —— 文章页声明 `triggers`、模块文件按 `<!-- category:x -->` 段命中；读取器按任务意图匹配，只加载命中的页面/段落。
+- **Route before body** —— 每个页面声明 `triggers`；读取器按任务意图匹配，只加载命中的页面。
 - **过期是算出来的，不是猜的** —— `status` 把基线提交与 `HEAD` 做 diff。
 - **重生成尊重人工** —— 页面记录 `content_hash`；手工修改过的页面默认跳过，`protected: true` 永久锁定，`--force` 可覆盖。
 - **崩溃可恢复** —— 分批生成向 `run.json` 写检查点；被杀掉的运行从断点继续，而不是从头重来。
