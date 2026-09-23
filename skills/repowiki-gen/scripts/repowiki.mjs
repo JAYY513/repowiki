@@ -959,6 +959,7 @@ async function cmdStatus(args) {
   // Stale — compute diff
   let changedFiles = [];
   let commitCount = 0;
+  let diffSucceeded = false;
   try {
     const baselineCommit = state.git.commit;
     const diffOutput = execSync(
@@ -983,6 +984,7 @@ async function cmdStatus(args) {
       { encoding: 'utf-8', cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim();
     commitCount = parseInt(revCount, 10) || 0;
+    diffSucceeded = true;
   } catch {
     // diff failed (e.g., baseline commit not found)
   }
@@ -1004,8 +1006,9 @@ async function cmdStatus(args) {
     }
   }
 
+  const isFresh = !branchMismatch && diffSucceeded && changedFiles.length === 0 && affectedPages.length === 0;
   const result = {
-    status: branchMismatch ? 'stale_cross_branch' : 'stale',
+    status: branchMismatch ? 'stale_cross_branch' : isFresh ? 'fresh' : 'stale',
     baseline_commit: state.git.commit,
     head_commit: currentCommit,
     branch: { expected: state.git.branch, actual: currentBranch },
@@ -1014,7 +1017,9 @@ async function cmdStatus(args) {
     affected_pages: affectedPages,
     message: branchMismatch
       ? `Branch mismatch: expected ${state.git.branch}, on ${currentBranch}`
-      : `Wiki is stale: ${commitCount} new commits, ${changedFiles.length} files changed`,
+      : isFresh
+        ? 'Wiki is up to date.'
+        : `Wiki is stale: ${commitCount} new commits, ${changedFiles.length} files changed`,
   };
 
   if (hasJson) {
@@ -1023,7 +1028,7 @@ async function cmdStatus(args) {
     process.stdout.write(result.status);
   } else {
     console.log(result.message);
-    if (changedFiles.length > 0) {
+    if (!isFresh && changedFiles.length > 0) {
       const pagesMsg = affectedPages.length > 0
         ? `${affectedPages.length} pages affected: ${affectedPages.slice(0, 5).join(', ')}${affectedPages.length > 5 ? '...' : ''}`
         : 'Run /repowiki-gen to update';
@@ -1031,7 +1036,7 @@ async function cmdStatus(args) {
     }
   }
 
-  return branchMismatch ? 10 : 10;
+  return isFresh ? 0 : 10;
 }
 
 // ─── Subcommand: validate ────────────────────────────────────────────────────
