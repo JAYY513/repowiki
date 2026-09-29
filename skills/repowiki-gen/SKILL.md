@@ -13,14 +13,16 @@ description: >
 
 ## 流水线（Step 0 接线 + 7 步生成）
 
+表中阶段名描述 agent 的工作流程；只有标明的 `repowiki ...` 是 CLI 命令。生成页面和整理链接由 agent 执行，不存在 `repowiki generate` 或 `repowiki link` 子命令。
+
 | 步 | 阶段 | 执行者 | 产出 |
 |---|---|---|---|
 | 0 | **wire** | `repowiki init`（幂等，每次运行先执行） | `AGENTS.md` 注入 `## repowiki` 分区 + 纪律句 + state 基线 |
 | 1 | **scan** | `repowiki scan` | `.repowiki/snapshot.json` + 规模统计 |
 | 2 | **budget** | 主 agent 直做（禁派生） | 规模档位 + 文章 caps |
 | 3 | **plan** | 主 agent 直做（禁派生） | 模块划分 + 知识卡 + 自定义主题 + 文章大纲 → `.repowiki/plan.json`（v2） |
-| 4 | **generate** | 按模块并行（执行粒度见 Step 4） | 4a 逐模块知识卡 → `knowledge/`；4b 自底向上文章 → `content/` |
-| 5 | **link** | 主 agent 直做（禁派生） | 卡片导航、父→子文章、index 清单、可达性 |
+| 4 | **生成页面** | 按模块并行（执行粒度见 Step 4） | 4a 逐模块知识卡 → `knowledge/`；4b 自底向上文章 → `content/` |
+| 5 | **整理链接** | 主 agent 直做（禁派生） | 卡片导航、父→子文章、index 清单、可达性 |
 | 6 | **validate** | 主 agent 直做（跑 `repowiki validate` 并亲自复核报告） | OKF 校验报告（含可达性与 plan 一致性） |
 | 7 | **finalize** | 主 agent 直做（跑 `repowiki state --update`） | `state.json` + `log.md` + 完成报告 |
 
@@ -51,7 +53,7 @@ agent 基于 scan 输出的规模统计（文件数、语言分布、目录结�
 | 扁平单层 | <50 个源文件，单层结构 | 2 | 1 | 6 | 3 | 3 | 1500 |
 | 模块树 | 50-500 个源文件，多层目录 | 8 | 2 | 30 | 8 | 5 | 2500 |
 | 深度限制 | >500 个源文件或复杂多模块 | 20 | 3 | 60 | 10 | 7 | 3000 |
-参考框架：`references/pipeline.md` 的 budget 评估与大纲规划规则。budget 档位同时决定执行粒度：`扁平单层`全程主 agent 直写、禁止派生；`模块树`及以上才允许按模块并行（细则见 Step 4），link/validate 复核/finalize 仍由主 agent 直做。
+参考框架：`references/pipeline.md` 的 budget 评估与大纲规划规则。budget 档位同时决定执行粒度：`扁平单层`全程主 agent 直写、禁止派生；`模块树`及以上才允许按模块并行（细则见 Step 4），链接整理 / 校验报告复核 / 收尾仍由主 agent 直做。
 #### Step 3: plan
 
 agent 产出 `.repowiki/plan.json`（v2）：
@@ -102,13 +104,13 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 
 判断：如果一个目录中大部分文件属于以上类别，跳过该目录，不纳入任何模块 scope。未覆盖文件留在 `uncovered` 列表中即可，不要求 100% 覆盖率。
 
-#### Step 4: generate
+#### Step 4: 生成页面
 
 **执行粒度（与 budget 档位联动）**
 
 - `扁平单层`：主 agent 直写全部卡与文章，禁止派生子 agent。agent 数恒为 1。
 - `模块树`及以上：只按模块并行——每模块一 agent，一次写完该模块全部维度卡（含自定义卡）与该模块归属的文章草稿；禁止按卡/按维度/按文章拆分派生（agent 数 O(模块)，禁 O(模块×维度) fan-out）。
-- link（Step 5）/ validate 报告复核（Step 6）/ finalize（Step 7）一律主 agent 直做，禁止外包。
+- 链接整理（Step 5）/ 校验报告复核（Step 6）/ 收尾（Step 7）一律主 agent 直做，禁止外包。
 - 并行 task 间经 `local://` 传 snapshot/plan 摘要（模块 slug→scope/dir、文章 parent/modules/file），不各自重读 `snapshot.json`/`plan.json` 全文。
 
 **4a 知识卡（逐模块一批）**
@@ -140,7 +142,7 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 
 **增量模式**（已有产物时，enforcement 口径：`affected_pages` 为唯一重生依据）
 
-1. 运行 `repowiki status --json` → 取 `affected_pages`：非空 = 唯一重生集合，禁止扩大到全量；空集（`[]`）= 零写入，直接跳过 4a/4b 进入 link 自查（只读）与完成报告。
+1. 运行 `repowiki status --json` → 取 `affected_pages`：非空 = 唯一重生集合，禁止扩大到全量；空集（`[]`）= 零写入，直接跳过 4a/4b 进入链接自查（只读）与完成报告。
 2. 重生成范围 = `affected_pages` 本体 + `modules` 命中受影响模块的文章 + 这些文章的祖先文章（summary 传播）；祖先文章只重写综述段落与 `## 更新摘要`，正文其余节逐字保留。
    - 引注定位：`status --json` 中 `citation_index_available: true` 时，用 `citation_revalidation_candidates` 缩小**行号锚点复核**范围；`changed_lines` 核对变更 hunk 是否仍支持结论，`line_shift` 核对原代码是否仅因插入/删除而移动并更新行号。该列表不是语义影响全集：仍须检查 `affected_pages` 的相关 diff 对结论的语义影响，不得因引用未列入候选就认定页面无影响。索引不可用时回退原文件级核查。
 3. 断点续跑：`run.json` 的 `written_pages` 已写页一律跳过（即使仍在 `affected_pages` 内），只处理未完成页；崩溃遗留页面不触发人工保护。
@@ -153,7 +155,7 @@ plan 阶段只对项目的**源码主干**做模块拆分。以下内容即使�
 - hash 不一致且不在 `run.json` 已写清单中 → 判定人工修改，默认跳过
 - `protected: true` 显式锁定的页面永久跳过
 
-#### Step 5: link
+#### Step 5: 整理链接
 
 主 agent 直做（禁派生），补全并自查链接（bundle 相对路径）：
 

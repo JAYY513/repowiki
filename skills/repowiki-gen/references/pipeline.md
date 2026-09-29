@@ -260,7 +260,7 @@
 ### 增量判定（`affected_pages` 为唯一依据）
 
 - `repowiki status --json` 的 `affected_pages` 非空 = 唯一重生集合（本体 + 命中文章 + 祖先综述），禁止扩大到全量。
-- `affected_pages` 为空集 → 零写入：跳过 4a/4b，只做 link 只读自查与完成报告。
+- `affected_pages` 为空集 → 零写入：跳过 4a/4b，只做链接只读自查与完成报告。
 - 祖先文章只重写综述段落与 `## 更新摘要`，正文其余节逐字保留。
 - `protected: true` 与 hash 不一致页默认跳过、不写入，完成报告逐页列出（`--force` 出路），禁止静默。
 
